@@ -1,0 +1,11 @@
+:root { font: 16px/1.7 system-ui, sans-serif; color-scheme: light dark; }
+body { margin: 0; }
+a { color: inherit; text-underline-offset: .25em; }
+.masthead { border-bottom: 1px solid color-mix(in srgb, currentColor 14%, transparent); padding: 1rem max(6vw, 1rem); }
+.masthead a { font-weight: 700; text-decoration: none; }
+main { max-width: 46rem; padding: 3rem 1.25rem; margin-inline: auto; }
+h1 { line-height: 1.18; font-size: clamp(2rem, 5vw, 3.25rem); margin-block: 0 .75em; }
+.posts { list-style: none; margin: 0; padding: 0; }
+.posts li { padding-block: .85rem; border-bottom: 1px solid color-mix(in srgb, currentColor 14%, transparent); }
+time { opacity: .7; }
+img { max-width: 100%; height: auto; }

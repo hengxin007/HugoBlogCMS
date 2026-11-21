@@ -1,0 +1,69 @@
+.metadata-fold { display: grid; flex: none; grid-template-rows: 1fr; }
+.metadata-clip { min-height: 0; }
+.metadata-fold-enter-active > .metadata-clip, .metadata-fold-leave-active > .metadata-clip { overflow: hidden; }
+
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-motion=off]) {
+    & {
+      --motion-fast: 120ms;
+      --motion-normal: 180ms;
+      --motion-layout: 220ms;
+      --motion-out: cubic-bezier(.2, .7, .25, 1);
+    }
+
+    .button, .tool-button, .status-button, .dialog-close, .post-item,
+    .filters button, .menu-item, .settings-theme, .settings-tab, .settings-repository,
+    .setup-sidebar li {
+      transition: background-color var(--motion-fast), color var(--motion-fast),
+        border-color var(--motion-fast), box-shadow var(--motion-fast), scale var(--motion-fast) var(--motion-out);
+    }
+    :is(.button, .tool-button, .status-button, .dialog-close, .settings-theme):active:not(:disabled) { scale: .96; }
+    .setup-card {
+      transition: border-color var(--motion-normal), background-color var(--motion-normal),
+        box-shadow var(--motion-normal), translate var(--motion-normal) var(--motion-out);
+    }
+    .setup-card:not(:disabled):is(:hover, :focus-visible) {
+      translate: 0 -3px;
+      box-shadow: 0 7px 18px color-mix(in srgb, var(--ink) 10%, transparent);
+    }
+    .setup-card:not(:disabled):active { translate: 0 -1px; }
+
+    .layout { transition: grid-template-columns var(--motion-layout) var(--motion-out); }
+    .layout:has(.resize-handle[data-state=drag]) { transition: none; }
+    .metadata-fold-enter-active, .metadata-fold-leave-active {
+      transition: grid-template-rows var(--motion-normal) var(--motion-out), opacity var(--motion-fast);
+    }
+    .metadata-fold-enter-from, .metadata-fold-leave-to { grid-template-rows: 0fr; opacity: 0; }
+    .pane-reveal-enter-active { animation: ui-fade-in var(--motion-normal) var(--motion-out) both; }
+
+    .settings-tab-list::before { transition: translate var(--motion-layout) var(--motion-out); }
+    .settings-panel[data-state=active], .setup-step-content, .setup-options {
+      animation: ui-slide-in var(--motion-normal) var(--motion-out) both;
+    }
+
+    .dialog-overlay[data-state=open] { animation: ui-fade-in var(--motion-normal) ease-out both; }
+    .dialog-overlay[data-state=closed] { animation: ui-fade-out var(--motion-fast) ease-in both; }
+    .dialog-content[data-state=open] { animation: ui-dialog-in var(--motion-normal) var(--motion-out) both; }
+    .dialog-content[data-state=closed] { animation: ui-dialog-out var(--motion-fast) ease-in both; }
+    .settings-panel-viewport { transition: height 360ms var(--motion-out); }
+    .settings-dialog[data-state=open] { animation: ui-dialog-in 320ms var(--motion-out) both; }
+    .settings-dialog[data-state=closed] { animation: ui-dialog-out 210ms ease-in both; }
+    .menu-content { transform-origin: var(--reka-popper-transform-origin, center); }
+    .menu-content[data-state=open] { animation: ui-menu-in var(--motion-normal) var(--motion-out) both; }
+    .menu-content[data-state=closed] { animation: ui-menu-out var(--motion-fast) ease-in both; }
+  }
+}
+
+:root[data-motion=off] .spinner { animation: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation: none; }
+}
+
+@keyframes ui-fade-in { from { opacity: 0; } }
+@keyframes ui-fade-out { to { opacity: 0; } }
+@keyframes ui-slide-in { from { opacity: 0; translate: 0 5px; } }
+@keyframes ui-dialog-in { from { opacity: 0; transform: translate(-50%, calc(-50% + 9px)) scale(.975); } }
+@keyframes ui-dialog-out { to { opacity: 0; transform: translate(-50%, calc(-50% + 5px)) scale(.985); } }
+@keyframes ui-menu-in { from { opacity: 0; scale: .96; } }
+@keyframes ui-menu-out { to { opacity: 0; scale: .98; } }
