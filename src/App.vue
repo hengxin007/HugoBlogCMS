@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { invoke, isTauri } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { ArrowUpRight, BookOpen, Check, CircleAlert, Columns2, Copy, Eye, FileText, Fingerprint, GitBranch, ImagePlus, Link2, LoaderCircle, PanelLeft, PanelLeftClose, PanelLeftOpen, Pencil, Trash2, Plus, RefreshCw, Search, Send, Settings2 } from 'lucide-vue-next'
+import { ArrowUpRight, BookOpen, Check, CircleAlert, Columns2, Copy, Eye, FileText, Fingerprint, FolderOpen, GitBranch, ImagePlus, Link2, LoaderCircle, PanelLeft, PanelLeftClose, PanelLeftOpen, Pencil, Trash2, Plus, RefreshCw, Search, Send, Settings2 } from 'lucide-vue-next'
 import { ContextMenuRoot, ContextMenuTrigger, ContextMenuPortal, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, SplitterGroup, SplitterPanel, SplitterResizeHandle } from 'reka-ui'
 import Button from './components/ui/Button.vue'
 import Dialog from './components/ui/Dialog.vue'
@@ -13,6 +13,7 @@ import SettingsDialog from './SettingsDialog.vue'
 import TagField from './TagField.vue'
 import { accentText, defaults, type Preferences } from './preferences'
 import Onboarding from './Onboarding.vue'
+import appIcon from '../src-tauri/icons/icon.ico?url'
 import type { Site, Startup } from './onboarding'
 import './onboarding.css'
 import type { Format } from './markdown'
@@ -280,6 +281,13 @@ async function copyLink(item: Entry) {
   try { await invoke<string>('copy_article_link', { path }); copiedLink.value = true }
   catch (reason) { error.value = String(reason) }
 }
+async function openArticleDirectory(item: Entry) {
+  const path = item.saved?.path ?? item.draft?.originalPath ?? null
+  const draftId = path ? null : item.draft?.id ?? null
+  error.value = ''
+  try { await invoke('open_article_directory', { path, draftId }) }
+  catch (reason) { error.value = String(reason) }
+}
 async function duplicate(item: Entry) {
   if (busy.value) return
   busy.value = '正在复制为新草稿…'
@@ -534,19 +542,23 @@ function applySettings(next: Preferences) {
   }
 }
 watch(() => published.value?.commit, commit => { deploymentState.value = ''; if (commit) void refreshDeployment(commit) })
-watch([preferences, dark, showWizard, site], ([settings, isDark, inWizard, currentSite]) => {
+watch([preferences, dark], ([settings, isDark]) => {
   const root = window.document.documentElement
-  root.dataset.theme = isDark && currentSite && !inWizard ? 'dark' : 'light'
+  root.dataset.theme = isDark ? 'dark' : 'light'
   root.dataset.motion = settings.disableAnimations ? 'off' : 'on'
   root.style.setProperty('--ui-font-size', settings.interfaceFontSize + 'px')
   root.style.setProperty('--editor-font-size', settings.editorFontSize + 'px')
   if (settings.theme === 'custom') {
     root.style.setProperty('--custom-accent', settings.accentColor)
     root.style.setProperty('--dark-custom-ink', 'color-mix(in srgb, ' + settings.accentColor + ' 48%, #fff)')
-    root.style.setProperty('--on-accent', accentText(settings.accentColor))
+    const onAccent = accentText(settings.accentColor)
+    const inkStrength = onAccent === '#000' ? 36 : 70
+    root.style.setProperty('--light-custom-ink', `color-mix(in srgb, var(--custom-accent) ${inkStrength}%, #161616)`)
+    root.style.setProperty('--on-accent', onAccent)
   } else {
     root.style.removeProperty('--custom-accent')
     root.style.removeProperty('--dark-custom-ink')
+    root.style.removeProperty('--light-custom-ink')
     root.style.removeProperty('--on-accent')
   }
 }, { immediate: true })
@@ -619,7 +631,7 @@ onBeforeUnmount(() => { systemTheme.removeEventListener('change', followSystemTh
   <div v-else-if="!site" class="setup-shell"><main class="setup-welcome"><p v-if="error" role="alert" class="setup-error">{{ error }}</p><p v-else role="status">正在加载博客 CMS…</p></main></div>
   <div v-else class="shell">
     <header class="appbar">
-      <div class="brand"><span class="brand-mark"><BookOpen :size="21" :stroke-width="2.25" /></span><div><strong>博客 CMS</strong><span :title="site.title">{{ siteHost }}</span></div></div>
+      <div class="brand"><img class="brand-mark" :src="appIcon" alt="" width="36" height="36" /><div><strong>博客 CMS</strong><span :title="site.title">{{ siteHost }}</span></div></div>
       <div class="app-actions"><span class="branch"><GitBranch :size="14" /> {{ site.branch }}</span><Button variant="ghost" :disabled="!!busy" @click="openSiteWizard">站点向导</Button><Button variant="ghost" title="应用设置" aria-label="应用设置" :disabled="!!busy" @click="settingsOpen = true"><Settings2 :size="18" /></Button></div>
     </header>
     <div class="layout" :class="{ 'sidebar-collapsed': !sidebarOpen }">
@@ -641,6 +653,7 @@ onBeforeUnmount(() => { systemTheme.removeEventListener('change', followSystemTh
                 <ContextMenuItem class="menu-item" @select="select(item)"><Pencil :size="15" />继续编辑</ContextMenuItem>
                 <ContextMenuItem v-if="supportsEditing(item.draft?.markdown ?? item.saved?.markdown ?? '')" class="menu-item" @select="duplicate(item)"><Copy :size="15" />复制为新草稿</ContextMenuItem>
                 <ContextMenuItem v-if="hasPublishedLink(item)" class="menu-item" @select="copyLink(item)"><Link2 :size="15" />复制文章链接</ContextMenuItem>
+                <ContextMenuItem class="menu-item" @select="openArticleDirectory(item)"><FolderOpen :size="15" />打开文章目录</ContextMenuItem>
                 <template v-if="item.draft || repositoryArticle(item)">
                   <ContextMenuSeparator class="menu-separator" />
                   <ContextMenuItem v-if="item.draft" class="menu-item menu-danger" @select="requestDiscard(item)"><Trash2 :size="15" />{{ item.draft.originalPath ? '放弃本地修改' : '删除草稿' }}</ContextMenuItem>

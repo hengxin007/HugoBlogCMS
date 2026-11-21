@@ -1,10 +1,10 @@
- .setup-shell { height: 100dvh; overflow: auto; background: #fff; color: var(--ink); }
+.setup-shell { height: 100dvh; overflow: auto; background: var(--paper); color: var(--ink); }
 .setup-appbar { height: 65px; display: flex; align-items: center; justify-content: space-between; padding: 0 28px; border-bottom: 1px solid var(--line); background: var(--paper); }
 .setup-welcome { width: min(100% - 48px, 760px); margin: clamp(44px, 11vh, 112px) auto 36px; text-align: center; }
 .setup-welcome h1 { margin: 19px 0 7px; font-size: clamp(2rem, 3.45vw, 3.3rem); font-weight: 720; letter-spacing: -.04em; }
 .setup-welcome > p, .setup-panel-body p { color: var(--muted); line-height: 1.65; }
-.setup-hero-icon, .setup-card-icon { display: grid; place-items: center; color: var(--accent-ink); background: var(--pale); border: 1px solid var(--line); border-radius: 14px; }
-.setup-hero-icon { width: 66px; height: 66px; margin-inline: auto; }
+.setup-card-icon { display: grid; place-items: center; color: var(--accent-ink); background: var(--pale); border: 1px solid var(--line); border-radius: 14px; }
+.setup-hero-icon { display: block; margin-inline: auto; object-fit: contain; }
 .setup-card-icon { width: 45px; height: 45px; margin-bottom: 13px; }
 .setup-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 32px; }
 .setup-card { display: flex; flex-direction: column; gap: 8px; padding: 25px; min-height: 218px; background: var(--paper); border: 1px solid var(--line); border-radius: 15px; text-align: left; color: var(--ink); cursor: pointer; }

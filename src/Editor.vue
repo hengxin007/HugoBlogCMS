@@ -20,7 +20,7 @@ const darkExtensions = [
     { tag: tags.heading, color: '#ededed', fontWeight: 'bold' },
     { tag: tags.strong, fontWeight: 'bold' },
     { tag: tags.emphasis, fontStyle: 'italic' },
-    { tag: [tags.link, tags.url], color: '#a8c5ff', textDecoration: 'underline' },
+    { tag: [tags.link, tags.url], color: 'var(--accent-ink)', textDecoration: 'underline' },
     { tag: tags.quote, color: '#bbbbbb' },
     { tag: tags.monospace, color: '#efc28c' },
     { tag: [tags.processingInstruction, tags.comment], color: '#afafaf' },

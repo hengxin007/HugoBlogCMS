@@ -14,7 +14,7 @@ export type Preferences = {
   customBase: Exclude<ThemeMode, 'custom'>
 }
 
-export const defaultAccent = '#005a9c'
+export const defaultAccent = '#a5235e'
 
 export type HugoInfo = { path: string; version: string; extended: boolean }
 

@@ -41,7 +41,9 @@ impl Workspace {
 
     pub fn open_external_markdown(&self, draft: &Draft) -> Reply<()> {
         let file = self.export_markdown(draft)?;
-        open_with_default_app(&file)
+        open_local_path(&file).map_err(|_| {
+            "无法打开 Markdown 文件。请在 Windows 默认应用中为 .md 设置关联。".into()
+        })
     }
 
     pub fn read_external_markdown(&self, id: &str) -> Reply<Option<ExternalMarkdown>> {
@@ -95,33 +97,6 @@ fn read_markdown(path: &Path) -> Reply<Option<String>> {
     String::from_utf8(bytes)
         .map(|text| Some(text.trim_start_matches('\u{feff}').to_owned()))
         .map_err(|_| "请在外部应用中将 Markdown 保存为 UTF-8。".into())
-}
-
-#[cfg(windows)]
-fn open_with_default_app(path: &Path) -> Reply<()> {
-    use std::{os::windows::ffi::OsStrExt, ptr::null};
-    use windows_sys::Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL};
-
-    let path: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
-    let result = unsafe {
-        ShellExecuteW(
-            std::ptr::null_mut(),
-            null(),
-            path.as_ptr(),
-            null(),
-            null(),
-            SW_SHOWNORMAL,
-        ) as isize
-    };
-    match result {
-        0..=32 => Err("无法打开 Markdown 文件。请在 Windows 默认应用中为 .md 设置关联。".into()),
-        _ => Ok(()),
-    }
-}
-
-#[cfg(not(windows))]
-fn open_with_default_app(_: &Path) -> Reply<()> {
-    Err("仅支持在 Windows 中打开默认应用。".into())
 }
 
 #[cfg(test)]

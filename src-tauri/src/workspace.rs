@@ -157,7 +157,7 @@ impl Default for Preferences {
             editor_font_size: 13,
             interface_font_size: 14,
             theme: Theme::System,
-            accent_color: "#005a9c".into(),
+            accent_color: "#a5235e".into(),
             custom_base: ThemeBase::System,
         }
     }
@@ -710,17 +710,7 @@ impl Workspace {
             return Err("草稿 ID 无效。".into());
         }
         let from = safe_join(&self.root, &format!("drafts/{id}"))?;
-        if from.exists() {
-            let to = safe_join(&self.root, &format!("discarded-drafts/{}", Uuid::new_v4()))?;
-            fs::create_dir_all(to.parent().expect("discard directory")).map_err(error)?;
-            fs::rename(&from, &to).map_err(error)?;
-            if let Err(err) = self.storage.remove(DRAFTS, id) {
-                fs::rename(&to, &from).map_err(error)?;
-                return Err(err);
-            }
-        } else {
-            self.storage.remove(DRAFTS, id)?;
-        }
+        self.storage.remove(DRAFTS, id)?;
         if self
             .preview
             .as_ref()
@@ -728,7 +718,18 @@ impl Workspace {
         {
             self.stop_preview();
         }
+        // Draft records live in SQLite. An open editor or Explorer window can
+        // prevent Windows from moving the draft directory. Keep those files in
+        // place when archiving is unavailable; the draft is already discarded.
+        if from.is_dir() {
+            let _ = self.archive_draft_files(&from);
+        }
         Ok(())
+    }
+    fn archive_draft_files(&self, from: &Path) -> Reply<()> {
+        let to = safe_join(&self.root, &format!("discarded-drafts/{}", Uuid::new_v4()))?;
+        fs::create_dir_all(to.parent().expect("discard directory")).map_err(error)?;
+        fs::rename(from, to).map_err(error)
     }
     pub fn duplicate(&self, original: &Draft, mut copy: Draft) -> Reply<Draft> {
         validate(original, self.posts_dir())?;
@@ -757,6 +758,29 @@ impl Workspace {
         }
         self.save(&copy)?;
         Ok(copy)
+    }
+    fn article_directory(&self, path: Option<&str>, draft_id: Option<&str>) -> Reply<PathBuf> {
+        match (path, draft_id) {
+            (Some(path), None) => {
+                let article = article_path(&self.source(), path, self.posts_dir())?;
+                if !article.is_file() {
+                    return Err("找不到该文章。请先同步 GitHub。".into());
+                }
+                Ok(article.parent().expect("article parent").to_path_buf())
+            }
+            (None, Some(id)) if uuid(id) => {
+                if self.storage.get::<Draft>(DRAFTS, id)?.is_none() {
+                    return Err("找不到该草稿。".into());
+                }
+                let directory = safe_join(&self.root, &format!("drafts/{id}"))?;
+                fs::create_dir_all(&directory).map_err(error)?;
+                Ok(directory)
+            }
+            _ => Err("无效的文章目录。".into()),
+        }
+    }
+    pub fn open_article_directory(&self, path: Option<&str>, draft_id: Option<&str>) -> Reply<()> {
+        open_local_path(&self.article_directory(path, draft_id)?)
     }
     pub fn copy_article_link(&self, path: &str) -> Reply<String> {
         let source = self.sync(false)?;
@@ -1440,6 +1464,33 @@ fn validate_preview_target(origin: &str, url: &str) -> Reply<Url> {
     Ok(target)
 }
 
+#[cfg(windows)]
+fn open_local_path(path: &Path) -> Reply<()> {
+    use std::{os::windows::ffi::OsStrExt, ptr::null};
+    use windows_sys::Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL};
+
+    let path: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+    let result = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            null(),
+            path.as_ptr(),
+            null(),
+            null(),
+            SW_SHOWNORMAL,
+        ) as isize
+    };
+    match result {
+        0..=32 => Err(format!("无法打开本地路径（Windows Shell 错误 {result}）。")),
+        _ => Ok(()),
+    }
+}
+
+#[cfg(not(windows))]
+fn open_local_path(_: &Path) -> Reply<()> {
+    Err("仅支持在 Windows 中打开本地路径。".into())
+}
+
 fn open_in_browser(url: &Url) -> Reply<()> {
     process("rundll32.exe")
         .arg("url.dll,FileProtocolHandler")
@@ -1482,6 +1533,78 @@ mod tests {
             percent_decode("p/%E6%B5%8B%E8%AF%95/index.html").unwrap(),
             "p/测试/index.html"
         );
+    }
+
+    #[test]
+    fn article_directory_uses_the_repository_or_saved_draft_location() {
+        let fixture = tempfile::tempdir().unwrap();
+        let ws = Workspace::new(fixture.path().to_path_buf(), PathBuf::new()).unwrap();
+        let stored = ws.source().join("content/post/published/index.md");
+        atomic_write(&stored, b"published article").unwrap();
+        assert_eq!(
+            ws.article_directory(Some("content/post/published/index.md"), None)
+                .unwrap(),
+            stored.parent().unwrap()
+        );
+        assert!(ws
+            .article_directory(Some("content/post/../../../outside.md"), None)
+            .is_err());
+
+        let draft = Draft {
+            id: Uuid::new_v4().to_string(),
+            path: "content/post/unpublished/index.md".into(),
+            original_path: None,
+            original_hash: None,
+            bundle_origin: None,
+            markdown: "unpublished draft".into(),
+            images: vec![],
+        };
+        assert!(ws.article_directory(None, Some(&draft.id)).is_err());
+        ws.save(&draft).unwrap();
+        let directory = ws.article_directory(None, Some(&draft.id)).unwrap();
+        assert_eq!(directory, ws.draft_dir(&draft));
+        assert!(directory.is_dir());
+        assert!(!ws.source().join(&draft.path).exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn discards_metadata_edits_when_windows_locks_the_draft_directory() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let fixture = tempfile::tempdir().unwrap();
+        let mut ws = Workspace::new(fixture.path().to_path_buf(), PathBuf::new()).unwrap();
+        let path = "content/post/published/index.md";
+        let stored = ws.source().join(path);
+        let original = b"---\ncategories: [existing]\n---\narticle body\n";
+        atomic_write(&stored, original).unwrap();
+        let draft = Draft {
+            id: Uuid::new_v4().to_string(),
+            path: path.into(),
+            original_path: Some(path.into()),
+            original_hash: Some(hash(original)),
+            bundle_origin: None,
+            markdown: "---\ncategories: []\n---\narticle body\n".into(),
+            images: vec![],
+        };
+        ws.save(&draft).unwrap();
+        let directory = ws.draft_dir(&draft);
+        fs::create_dir_all(&directory).unwrap();
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+        let handle = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(&directory)
+            .unwrap();
+        assert!(ws.archive_draft_files(&directory).is_err());
+        ws.discard(&draft.id).unwrap();
+        assert!(ws.storage.list::<Draft>(DRAFTS).unwrap().is_empty());
+        assert_eq!(fs::read(stored).unwrap(), original);
+        drop(handle);
+        assert!(directory.is_dir());
+        ws.discard(&draft.id).unwrap();
+        assert!(!directory.exists());
     }
 
     #[test]

@@ -60,6 +60,17 @@ async fn duplicate_draft(app: AppHandle, original: Draft, copy: Draft) -> Reply<
     task(app, move |ws| ws.duplicate(&original, copy)).await
 }
 #[tauri::command]
+async fn open_article_directory(
+    app: AppHandle,
+    path: Option<String>,
+    draft_id: Option<String>,
+) -> Reply<()> {
+    task(app, move |ws| {
+        ws.open_article_directory(path.as_deref(), draft_id.as_deref())
+    })
+    .await
+}
+#[tauri::command]
 async fn copy_article_link(app: AppHandle, path: String) -> Reply<String> {
     task(app, move |ws| ws.copy_article_link(&path)).await
 }
@@ -224,6 +235,7 @@ fn main() {
             discard_draft,
             duplicate_draft,
             copy_article_link,
+            open_article_directory,
             preview_article,
             open_preview,
             prepare_publish,

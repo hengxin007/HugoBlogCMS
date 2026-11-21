@@ -51,7 +51,7 @@ function keydown(event: KeyboardEvent) {
       </span>
       <input :id="id" ref="input" v-model="query" role="combobox" type="text" autocomplete="off"
         :aria-expanded="showOptions" :aria-controls="id + '-options'" aria-autocomplete="list"
-        :aria-activedescendant="showOptions ? id + '-add' : undefined" :placeholder="values.length ? '继续添加' : '输入后按 Enter 添加'"
+        :aria-activedescendant="showOptions ? id + '-add' : undefined"
         @focus="expanded = true" @input="expanded = true" @blur="expanded = false" @keydown="keydown" />
     </div>
     <ul v-show="showOptions" :id="id + '-options'" role="listbox" :aria-label="'添加' + label" class="tag-options">

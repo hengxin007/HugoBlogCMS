@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import appIcon from '../src-tauri/icons/icon.ico?url'
 import { computed, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { ArrowLeft, ArrowRight, ArrowUpRight, BookOpen, Check, ChevronRight, Cloud, CodeXml, Copy, FolderOpen, Github, Globe2, LoaderCircle, Plus, Settings2 } from 'lucide-vue-next'
@@ -99,12 +100,12 @@ function connect() {
 <template>
   <div class="setup-shell" :aria-busy="!!loading">
     <header class="setup-appbar">
-      <div class="brand"><span class="brand-mark"><BookOpen :size="21" /></span><div><strong>博客 CMS</strong><span>站点设置</span></div></div>
+      <div class="brand"><img class="brand-mark" :src="appIcon" alt="" width="36" height="36" /><div><strong>博客 CMS</strong><span>站点设置</span></div></div>
       <Button v-if="!welcome" variant="ghost" :disabled="!!loading" @click="showWelcome"><ArrowLeft :size="16" /> 返回欢迎页</Button>
     </header>
 
     <main v-if="welcome" class="setup-welcome">
-      <div class="setup-hero-icon"><BookOpen :size="32" :stroke-width="1.65" /></div>
+      <img class="setup-hero-icon" :src="appIcon" alt="" width="66" height="66" />
       <h1>欢迎使用博客 CMS</h1>
       <p v-if="state.site">已连接 {{ state.site.title }}。可以继续写作，或检查 GitHub 和 Cloudflare 设置。</p>
       <p v-else>创建你的 Hugo 博客，或连接一个已有站点。</p>
