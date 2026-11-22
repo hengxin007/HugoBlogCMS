@@ -6,9 +6,18 @@ on:
     tags: ['v*']
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag (for example v1.0.11)
+        required: true
+        type: string
 
 permissions:
   contents: read
+
+env:
+  RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.release_tag || '' }}
 
 jobs:
   build:
@@ -20,6 +29,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || '' }}
 
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -28,12 +38,12 @@ jobs:
           cache: npm
 
       - name: Verify tag matches app version
-        if: github.ref_type == 'tag'
+        if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
         shell: pwsh
         run: |
           $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
           $packageVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          if ($version -notmatch '^\d+\.\d+\.\d+$' -or $env:GITHUB_REF_NAME -cne "v$version" -or $packageVersion -cne $version) {
+          if ($version -notmatch '^\d+\.\d+\.\d+$' -or $env:RELEASE_TAG -cne "v$version" -or $packageVersion -cne $version) {
             throw 'The release tag, package.json, and Tauri configuration must use the same stable version.'
           }
 
@@ -75,7 +85,7 @@ jobs:
 
   publish:
     name: Publish GitHub Release
-    if: github.event_name == 'push' && github.ref_type == 'tag'
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -94,8 +104,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          installer="Hugo-Blog-CMS_${GITHUB_REF_NAME#v}_x64-setup.exe"
+          installer="Hugo-Blog-CMS_${RELEASE_TAG#v}_x64-setup.exe"
           sha256sum --check -- "${installer}.sha256"
-          gh release create "$GITHUB_REF_NAME" "$installer" "${installer}.sha256" \
+          gh release create "$RELEASE_TAG" "$installer" "${installer}.sha256" \
             --repo "$GITHUB_REPOSITORY" --verify-tag \
-            --title "Hugo Blog CMS $GITHUB_REF_NAME" --generate-notes
+            --title "Hugo Blog CMS $RELEASE_TAG" --generate-notes
