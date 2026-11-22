@@ -105,7 +105,7 @@ jobs:
         shell: bash
         run: |
           installer="Hugo-Blog-CMS_${RELEASE_TAG#v}_x64-setup.exe"
-          sha256sum --check -- "${installer}.sha256"
+          tr -d '\r' < "${installer}.sha256" | sha256sum --check
           gh release create "$RELEASE_TAG" "$installer" "${installer}.sha256" \
             --repo "$GITHUB_REPOSITORY" --verify-tag \
             --title "Hugo Blog CMS $RELEASE_TAG" --generate-notes
