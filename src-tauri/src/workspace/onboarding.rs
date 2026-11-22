@@ -202,6 +202,7 @@ impl Workspace {
 
         self.blog_remote.clone_from(&site.remote);
         self.site = Some(site);
+        self.preview_modules = None;
         self.stop_preview();
         Ok(())
     }
@@ -924,6 +925,7 @@ impl Workspace {
             id: String::new(),
             path: String::new(),
             revision: String::new(),
+            updated_modules: false,
             images: HashSet::new(),
         };
         wait_preview(&mut preview, address)?;

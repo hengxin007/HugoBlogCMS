@@ -151,7 +151,14 @@ iframe { width: 100%; border: 0; background: var(--quiet); }
 .repository-status { min-width: 0; max-width: min(239px, 42%); gap: 7px; }
 .repository-status > .status-button { flex: none; }
 .repository-dot { flex: 0 0 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--repository-dot); }
+.repository-trigger { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 3px 5px; color: inherit; border-radius: 4px; }
+.repository-trigger:hover { background: var(--pale); color: var(--ink); }
 .status-repository { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.repository-details { display: grid; gap: 5px; margin: 0 0 12px; overflow-wrap: anywhere; }
+.repository-details code { color: var(--muted); user-select: text; }
+.repository-modules { display: grid; gap: 8px; list-style: none; padding: 0; margin: 0; max-height: 32vh; overflow: auto; }
+.repository-modules li { display: grid; gap: 3px; padding: 7px 9px; background: var(--surface); border: 1px solid var(--line); border-radius: 5px; }
+.repository-feedback { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 22vh; overflow: auto; }
 .delete-article-target { display: grid; gap: 4px; overflow-wrap: anywhere; }
 .delete-article-target code { color: var(--muted); }
 .settings-data-directory { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); }

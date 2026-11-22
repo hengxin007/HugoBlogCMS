@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue'
-import { invoke, isTauri } from '@tauri-apps/api/core'
-import { getCurrentWindow } from '@tauri-apps/api/window'
+import { Channel, invoke, isTauri } from '@tauri-apps/api/core'
 import { ArrowUpRight, BookOpen, Check, CircleAlert, Columns2, Copy, Eye, FileText, Fingerprint, FolderOpen, GitBranch, ImagePlus, Link2, LoaderCircle, PanelLeft, PanelLeftClose, PanelLeftOpen, Pencil, Trash2, Plus, RefreshCw, Search, Send, Settings2 } from 'lucide-vue-next'
 import { ContextMenuRoot, ContextMenuTrigger, ContextMenuPortal, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, SplitterGroup, SplitterPanel, SplitterResizeHandle } from 'reka-ui'
 import Button from './components/ui/Button.vue'
@@ -24,6 +23,8 @@ type Picture = { id: string; path: string; hosted: boolean }
 type Draft = { id: string; path: string; originalPath: string | null; originalHash: string | null; markdown: string; images: Picture[] }
 type StoredArticle = { path: string; markdown: string; hash: string }
 type Library = { articles: StoredArticle[]; drafts: Draft[]; warning?: string }
+type RepositoryInfo = { remote: string; modules: { path: string; url: string }[] }
+type RepositoryRefresh = { repository: RepositoryInfo; library: Library }
 type Summary = { url: string; files: string[]; hostedFiles: string[]; approval: string; diff: string }
 type ExternalMarkdown = { markdown: string; baseHash: string }
 type Published = { path?: string; commit: string }
@@ -56,6 +57,12 @@ const previewRevision = ref(0)
 const previewing = ref(false)
 const metaOpen = ref(true)
 const settingsOpen = ref(false)
+const repositoryOpen = ref(false)
+const repositoryInfo = ref<RepositoryInfo>()
+const repositoryLoading = ref(false)
+const repositoryRefreshing = ref(false)
+const repositoryError = ref('')
+const repositoryMessage = ref('')
 const externalConflictId = ref<string>()
 const externalConflictOpen = computed({
   get: () => externalConflictId.value !== undefined,
@@ -101,7 +108,7 @@ let saveTimer: ReturnType<typeof setTimeout> | undefined
 let previewTimer: ReturnType<typeof setTimeout> | undefined
 let saveQueue: Promise<void> = Promise.resolve()
 let previewGeneration = 0
-let unlistenClose: (() => void) | undefined
+let quitRequested = false
 
 function fieldsOf(source: string) {
   try { return readFields(parseArticle(source).header) } catch { return {} }
@@ -127,17 +134,53 @@ const entries = computed<Entry[]>(() => {
 })
 
 function clone(draft: Draft) { return JSON.parse(JSON.stringify(draft)) as Draft }
+function applyLibrary(library: Library) {
+  articles.value = library.articles
+  drafts.value = library.drafts
+  if (library.warning) error.value = library.warning
+  if (!active.value && library.drafts.length) activate(clone(library.drafts[0]))
+}
 async function refresh(sync: boolean) {
   busy.value = sync ? '正在同步 GitHub…' : '正在读取文章…'
   error.value = ''
   try {
-    const library = await invoke<Library>('library', { sync })
-    articles.value = library.articles
-    drafts.value = library.drafts
-    if (library.warning) error.value = library.warning
-    if (!active.value && library.drafts.length) activate(clone(library.drafts[0]))
+    applyLibrary(await invoke<Library>('library', { sync }))
   } catch (reason) { error.value = String(reason) }
   finally { busy.value = '' }
+}
+async function showRepository() {
+  repositoryOpen.value = true
+  if (repositoryLoading.value || repositoryRefreshing.value) return
+  repositoryLoading.value = true
+  repositoryError.value = ''
+  repositoryMessage.value = ''
+  repositoryInfo.value = undefined
+  try { repositoryInfo.value = await invoke<RepositoryInfo>('repository_info') }
+  catch (reason) { repositoryError.value = String(reason) }
+  finally { repositoryLoading.value = false }
+}
+async function refreshRepository() {
+  if (busy.value || repositoryLoading.value) return
+  busy.value = '正在刷新仓库和子模块…'
+  repositoryRefreshing.value = true
+  repositoryError.value = ''
+  repositoryMessage.value = ''
+  try {
+    await flush()
+    const result = await invoke<RepositoryRefresh>('refresh_repository')
+    repositoryInfo.value = result.repository
+    applyLibrary(result.library)
+    clearTimeout(previewTimer)
+    const generation = ++previewGeneration
+    if (active.value) {
+      await renderPreview(generation, true)
+      if (previewError.value) repositoryError.value = '仓库已刷新，Hugo 预览失败。\n' + previewError.value
+      else repositoryMessage.value = '仓库和本地预览已刷新。'
+    } else {
+      repositoryMessage.value = '仓库已刷新。打开一篇文章即可查看预览。'
+    }
+  } catch (reason) { repositoryError.value = String(reason) }
+  finally { repositoryRefreshing.value = false; busy.value = '' }
 }
 function activate(draft: Draft) {
   previewGeneration++
@@ -242,20 +285,21 @@ function schedulePreview(delay = 650, refreshPage = false) {
   clearTimeout(previewTimer)
   const generation = ++previewGeneration
   if (!active.value) return
-  previewTimer = setTimeout(async () => {
-    const draft = active.value
-    if (!draft || generation !== previewGeneration) return
-    previewing.value = true
-    try {
-      const url = await invoke<string>('preview_article', { draft: clone(draft) })
-      if (generation === previewGeneration) {
-        if (refreshPage && previewUrl.value === url) previewRevision.value++
-        previewUrl.value = url
-        previewError.value = ''
-      }
-    } catch (reason) { if (generation === previewGeneration) previewError.value = String(reason) }
-    finally { if (generation === previewGeneration) previewing.value = false }
-  }, delay)
+  previewTimer = setTimeout(() => { void renderPreview(generation, refreshPage) }, delay)
+}
+async function renderPreview(generation: number, refreshPage: boolean) {
+  const draft = active.value
+  if (!draft || generation !== previewGeneration) return
+  previewing.value = true
+  try {
+    const url = await invoke<string>('preview_article', { draft: clone(draft) })
+    if (generation === previewGeneration) {
+      if (refreshPage && previewUrl.value === url) previewRevision.value++
+      previewUrl.value = url
+      previewError.value = ''
+    }
+  } catch (reason) { if (generation === previewGeneration) previewError.value = String(reason) }
+  finally { if (generation === previewGeneration) previewing.value = false }
 }
 async function openPreviewBrowser(url: string) {
   try { await invoke('open_preview', { url }) }
@@ -597,20 +641,31 @@ async function refreshDeployment(commit: string, explicit = false) {
 async function openPage(page: string, path?: string) {
   try { await invoke('open_page', { page, path }) } catch (reason) { error.value = String(reason) }
 }
+async function quitWhenIdle() {
+  if (!quitRequested || busy.value) return
+  quitRequested = false
+  busy.value = '正在保存草稿并退出…'
+  try {
+    await flush()
+    await invoke('quit_application')
+  } catch (reason) {
+    quitRequested = false
+    busy.value = ''
+    error.value = String(reason)
+    void invoke('show_main_window').catch(() => {})
+  }
+}
+watch(busy, () => { void quitWhenIdle() })
 onMounted(async () => {
   systemTheme.addEventListener('change', followSystemTheme)
   if (!isTauri()) { error.value = '请使用 Windows 客户端打开博客 CMS。'; return }
   externalTimer = setInterval(() => { void refreshExternalMarkdown() }, 1250)
-  unlistenClose = await getCurrentWindow().onCloseRequested(async event => {
-    if (busy.value || saveState.value === '保存中…' || saveState.value === '保存失败') {
-      event.preventDefault()
-      if (!busy.value) {
-        saveState.value = '保存中…'
-        try { await flush(); await getCurrentWindow().destroy() } catch (reason) { error.value = String(reason) }
-      }
-    }
+  const quitChannel = new Channel<null>(() => {
+    quitRequested = true
+    void quitWhenIdle()
   })
   try {
+    await invoke('register_tray_quit', { channel: quitChannel })
     preferences.value = await invoke<Preferences>('settings')
     const legacyHostedImages = localStorage.getItem('hosted-images')
     if (legacyHostedImages !== null) {
@@ -623,7 +678,7 @@ onMounted(async () => {
     if (startup.value.site && !startup.value.showWelcome) await loadEditor(startup.value.site)
   } catch (reason) { error.value = String(reason) }
 })
-onBeforeUnmount(() => { systemTheme.removeEventListener('change', followSystemTheme); clearTimeout(saveTimer); clearTimeout(previewTimer); clearInterval(externalTimer); unlistenClose?.() })
+onBeforeUnmount(() => { systemTheme.removeEventListener('change', followSystemTheme); clearTimeout(saveTimer); clearTimeout(previewTimer); clearInterval(externalTimer) })
 </script>
 
 <template>
@@ -724,8 +779,9 @@ onBeforeUnmount(() => { systemTheme.removeEventListener('change', followSystemTh
     </div>
     <footer class="statusbar">
       <div class="status-group repository-status">
-        <span class="status-repository" :title="repoName">{{ repoName }}</span>
-        <span class="repository-dot" aria-hidden="true" />
+        <button type="button" class="repository-trigger" aria-haspopup="dialog" :aria-expanded="repositoryOpen" :title="'查看仓库与子模块 · ' + repoName" :disabled="!!busy && !repositoryRefreshing" @click="showRepository">
+          <span class="status-repository">{{ repoName }}</span><span class="repository-dot" aria-hidden="true" />
+        </button>
         <button type="button" class="status-button" :title="sidebarOpen ? '收起文章目录' : '展开文章目录'" :aria-label="sidebarOpen ? '收起文章目录' : '展开文章目录'" :aria-expanded="sidebarOpen" aria-controls="article-sidebar" @click="sidebarOpen = !sidebarOpen">
           <PanelLeftClose v-if="sidebarOpen" :size="16" /><PanelLeftOpen v-else :size="16" />
         </button>
@@ -741,6 +797,26 @@ onBeforeUnmount(() => { systemTheme.removeEventListener('change', followSystemTh
     </footer>
     <SettingsDialog v-model:open="settingsOpen" :preferences="preferences" :hosted-available="site.hostedImages" :preview-port="previewPort" @saved="applySettings" />
     <input ref="imageFile" hidden type="file" accept="image/png,image/jpeg,image/webp,image/bmp,image/gif" @change="importFile" @cancel="pendingImage = undefined" />
+    <Dialog v-model:open="repositoryOpen" title="站点仓库" description="刷新会同步博客和子模块，并用子模块的远端版本更新本地 Hugo 预览。">
+      <section class="repository-details" aria-label="博客仓库">
+        <strong>博客仓库</strong><code>{{ repositoryInfo?.remote ?? site.remote }}</code>
+      </section>
+      <section class="repository-details" aria-label="Git 子模块">
+        <strong>Git 子模块</strong>
+        <span v-if="repositoryLoading" role="status">正在读取子模块…</span>
+        <span v-else-if="repositoryInfo && !repositoryInfo.modules.length">此仓库没有 Git 子模块。</span>
+        <ul v-else-if="repositoryInfo" class="repository-modules">
+          <li v-for="module in repositoryInfo.modules" :key="module.path"><span>{{ module.path }}</span><code>{{ module.url }}</code></li>
+        </ul>
+      </section>
+      <p v-if="repositoryError" class="danger-text repository-feedback" role="alert">{{ repositoryError }}</p>
+      <p v-else-if="repositoryMessage || repositoryRefreshing" class="repository-feedback" role="status">{{ repositoryRefreshing ? '正在刷新仓库和 Hugo 预览…' : repositoryMessage }}</p>
+      <div class="dialog-actions">
+        <Button :disabled="!!busy || repositoryLoading" title="刷新(包含子模块)" @click="refreshRepository">
+          <LoaderCircle v-if="repositoryRefreshing" class="spinner" :size="15" /><RefreshCw v-else :size="15" />刷新(包含子模块)
+        </Button>
+      </div>
+    </Dialog>
     <Dialog v-model:open="externalConflictOpen" title="导入外部修改？" description="CMS 草稿和外部 Markdown 都有改动。导入会用外部文件内容替换当前草稿。">
       <div class="dialog-actions"><Button variant="outline" @click="externalConflictOpen = false">取消</Button><Button @click="confirmExternalMarkdown">导入外部修改</Button></div>
     </Dialog>

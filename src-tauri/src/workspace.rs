@@ -18,6 +18,7 @@ use walkdir::WalkDir;
 pub mod external_edit;
 mod git_proxy;
 pub mod onboarding;
+pub mod repository;
 use onboarding::SiteConfig;
 mod storage;
 use storage::{Storage, DRAFTS, OPERATIONS, SETTINGS};
@@ -102,6 +103,7 @@ struct Preview {
     id: String,
     path: String,
     revision: String,
+    updated_modules: bool,
     images: HashSet<String>,
 }
 impl Drop for Preview {
@@ -182,6 +184,7 @@ pub struct Workspace {
 
     hosting_remote: String,
     preview: Option<Preview>,
+    preview_modules: Option<repository::PreviewModules>,
     approval: Option<(String, String, String)>,
 }
 
@@ -419,6 +422,7 @@ impl Workspace {
             hosting_remote: HOSTING.into(),
             site,
             preview: None,
+            preview_modules: None,
             approval: None,
         })
     }
@@ -951,7 +955,8 @@ impl Workspace {
                         fs::remove_file(path).map_err(error)?;
                     }
                 }
-                let permalink = self.permalink(&source, &checkout, &draft.path, &origin)?;
+                let themes = if preview.updated_modules { &checkout } else { &source };
+                let permalink = self.permalink(themes, &checkout, &draft.path, &origin)?;
                 let preview = self.preview.as_mut().expect("active preview");
                 preview.images = files;
                 if preview.child.try_wait().map_err(error)?.is_none() {
@@ -963,15 +968,17 @@ impl Workspace {
         let dir = tempfile::tempdir_in(&self.root).map_err(error)?;
         let checkout = dir.path().join("site");
         self.checkout(&source, &checkout)?;
+        let updated_modules = self.apply_preview_modules(&source, &revision, &checkout)?;
+        let themes = if updated_modules { &checkout } else { &source };
         let images = self.stage_draft(&checkout, draft, None)?;
         let socket = bind_preview_port(self.preferences.preview_port.unwrap_or_default())?;
         let address = socket.local_addr().map_err(error)?;
         let origin = format!("http://{address}/");
-        let permalink = self.permalink(&source, &checkout, &draft.path, &origin)?;
+        let permalink = self.permalink(themes, &checkout, &draft.path, &origin)?;
         let log = dir.path().join("hugo.log");
         let output = fs::File::create(&log).map_err(error)?;
         let stderr = output.try_clone().map_err(error)?;
-        let mut cmd = self.hugo(&source, &checkout)?;
+        let mut cmd = self.hugo(themes, &checkout)?;
         cmd.args([
             "server",
             "-D",
@@ -996,6 +1003,7 @@ impl Workspace {
             id: draft.id.clone(),
             path: draft.path.clone(),
             revision,
+            updated_modules,
         };
         let deadline = Instant::now() + Duration::from_secs(16);
         loop {

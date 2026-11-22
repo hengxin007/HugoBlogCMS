@@ -4,11 +4,86 @@
 mod file_picker;
 mod workspace;
 use std::{path::PathBuf, sync::Mutex};
-use tauri::{AppHandle, Manager};
+use tauri::{
+    ipc::Channel,
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    AppHandle, Manager, State, WebviewWindow, WindowEvent,
+};
 use workspace::onboarding::{Action, Input, SetupPreview, Startup};
 use workspace::{Draft, HugoInfo, Preferences, Workspace};
 type Reply<T> = Result<T, String>;
 struct Backend(Reply<Mutex<Workspace>>);
+
+#[derive(Default)]
+struct TrayQuit(Mutex<Option<Channel<()>>>);
+
+#[tauri::command]
+fn register_tray_quit(state: State<'_, TrayQuit>, channel: Channel<()>) -> Reply<()> {
+    *state.0.lock().map_err(|_| "托盘退出服务不可用。")? = Some(channel);
+    Ok(())
+}
+
+#[tauri::command]
+fn quit_application(app: AppHandle) {
+    app.exit(0);
+}
+
+#[tauri::command]
+fn show_main_window(window: WebviewWindow) -> Reply<()> {
+    window
+        .show()
+        .and_then(|_| window.unminimize())
+        .and_then(|_| window.set_focus())
+        .map_err(|error| error.to_string())
+}
+
+fn show_from_tray(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = show_main_window(window);
+    }
+}
+
+fn create_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let show = MenuItem::with_id(app, "tray-show", "显示", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "tray-quit", "退出", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
+    let icon = app.default_window_icon().ok_or("找不到应用图标。")?;
+    TrayIconBuilder::with_id("blog-cms")
+        .icon(icon.clone())
+        .tooltip("博客 CMS")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "tray-show" => show_from_tray(app),
+            "tray-quit" => {
+                let state = app.state::<TrayQuit>();
+                let notified = state.0.lock().ok().is_some_and(|registered| {
+                    registered
+                        .as_ref()
+                        .is_some_and(|channel| channel.send(()).is_ok())
+                });
+                if !notified {
+                    app.exit(0);
+                }
+            }
+            _ => (),
+        })
+        .on_tray_icon_event(|tray, event| {
+            if matches!(
+                event,
+                TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
+                }
+            ) {
+                show_from_tray(tray.app_handle());
+            }
+        })
+        .build(app)?;
+    Ok(())
+}
 
 async fn task<T: Send + 'static>(
     app: AppHandle,
@@ -31,6 +106,14 @@ async fn task<T: Send + 'static>(
 #[tauri::command]
 async fn library(app: AppHandle, sync: bool) -> Reply<workspace::Library> {
     task(app, move |ws| ws.library(sync)).await
+}
+#[tauri::command]
+async fn repository_info(app: AppHandle) -> Reply<workspace::repository::RepositoryInfo> {
+    task(app, |ws| ws.repository_info()).await
+}
+#[tauri::command]
+async fn refresh_repository(app: AppHandle) -> Reply<workspace::repository::RepositoryRefresh> {
+    task(app, |ws| ws.refresh_repository()).await
 }
 #[tauri::command]
 async fn save_draft(app: AppHandle, draft: Draft) -> Reply<()> {
@@ -182,6 +265,14 @@ async fn deployment_status(app: AppHandle, commit: String) -> Reply<Option<Strin
 
 fn main() {
     let app = tauri::Builder::default()
+        .manage(TrayQuit::default())
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" && window.hide().is_ok() {
+                    api.prevent_close();
+                }
+            }
+        })
         .setup(|app| {
             let legacy = app.path().app_local_data_dir()?;
             let executable = std::env::current_exe()?;
@@ -223,10 +314,16 @@ fn main() {
                 builder
             };
             builder.build()?;
+            create_tray(app)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            register_tray_quit,
+            quit_application,
+            show_main_window,
             library,
+            repository_info,
+            refresh_repository,
             save_draft,
             open_external_markdown,
             read_external_markdown,

@@ -6,7 +6,6 @@
     "main"
   ],
   "permissions": [
-    "core:default",
-    "core:window:allow-destroy"
+    "core:default"
   ]
 }
