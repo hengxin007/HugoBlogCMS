@@ -38,7 +38,7 @@ fn show_main_window(window: WebviewWindow) -> Reply<()> {
         .map_err(|error| error.to_string())
 }
 
-fn show_from_tray(app: &AppHandle) {
+fn restore_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = show_main_window(window);
     }
@@ -55,7 +55,7 @@ fn create_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
-            "tray-show" => show_from_tray(app),
+            "tray-show" => restore_main_window(app),
             "tray-quit" => {
                 let state = app.state::<TrayQuit>();
                 let notified = state.0.lock().ok().is_some_and(|registered| {
@@ -78,7 +78,7 @@ fn create_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                     ..
                 }
             ) {
-                show_from_tray(tray.app_handle());
+                restore_main_window(tray.app_handle());
             }
         })
         .build(app)?;
@@ -265,6 +265,9 @@ async fn deployment_status(app: AppHandle, commit: String) -> Reply<Option<Strin
 
 fn main() {
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            restore_main_window(app);
+        }))
         .manage(TrayQuit::default())
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
