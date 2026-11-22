@@ -1,0 +1,101 @@
+name: Build and release Windows
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Test and build Windows x64
+    runs-on: windows-2022
+    timeout-minutes: 50
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Verify tag matches app version
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        run: |
+          $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $packageVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($version -notmatch '^\d+\.\d+\.\d+$' -or $env:GITHUB_REF_NAME -cne "v$version" -or $packageVersion -cne $version) {
+            throw 'The release tag, package.json, and Tauri configuration must use the same stable version.'
+          }
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prepare bundled Hugo Extended
+        shell: pwsh
+        run: ./scripts/prepare-hugo.ps1
+
+      - name: Test the frontend
+        run: npm test
+
+      - name: Test the backend
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+
+      - name: Build the NSIS installer
+        run: npm run tauri build -- --target x86_64-pc-windows-msvc --bundles nsis -- --locked
+
+      - name: Collect installer and checksum
+        shell: pwsh
+        run: |
+          $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $installers = @(Get-ChildItem -LiteralPath src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis -Filter "*_${version}_x64-setup.exe" -File)
+          if ($installers.Count -ne 1) { throw 'Expected exactly one Windows x64 installer.' }
+          $name = "Hugo-Blog-CMS_${version}_x64-setup.exe"
+          New-Item -ItemType Directory -Path release-assets | Out-Null
+          $installer = Join-Path release-assets $name
+          Copy-Item -LiteralPath $installers[0].FullName -Destination $installer
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installer).Hash.ToLowerInvariant()
+          Set-Content -LiteralPath "$installer.sha256" -Value "$hash  $name" -Encoding utf8NoBOM
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-x64-installer
+          path: release-assets/
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download the tested installer
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: windows-x64-installer
+          path: release-assets
+
+      - name: Verify and publish release assets
+        working-directory: release-assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          installer="Hugo-Blog-CMS_${GITHUB_REF_NAME#v}_x64-setup.exe"
+          sha256sum --check -- "${installer}.sha256"
+          gh release create "$GITHUB_REF_NAME" "$installer" "${installer}.sha256" \
+            --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "Hugo Blog CMS $GITHUB_REF_NAME" --generate-notes
